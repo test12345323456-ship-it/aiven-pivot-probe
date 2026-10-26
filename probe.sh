@@ -18,4 +18,4 @@ echo "=== internal port scan (fast connect only) ==="
 for ip in "127.0.0.1" "192.168.88.9" "35.210.14.70"; do
   for p in 4343 32001 80 443 8080; do timeout 1 bash -c "echo > /dev/tcp/$ip/$p" 2>/dev/null && echo "OPEN $ip:$p"; done
 done
-echo "=== DONE ==="
+echo "=== DONE ==="; echo "=====RESULTS-MIRROR====="; cat /srv/res.txt
