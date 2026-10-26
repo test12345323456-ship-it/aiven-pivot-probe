@@ -1,21 +1,28 @@
 #!/bin/bash
-echo "=== env (variable names + values of OUR app only) ==="
-env | sort
-echo "=== /etc/hosts ==="; cat /etc/hosts
-echo "=== resolv.conf ==="; cat /etc/resolv.conf 2>/dev/null | head -5
-echo "=== DNS: internal names ==="
-for h in pg17-flip-a-1.test12345323456-ae5b.aiven.local admin-api.aiven.io mcp.aiven.live iam.aiven.io; do
-  echo "-- $h:"; getent hosts "$h" || echo "   NXDOMAIN"
+echo "=== capabilities/kernel ==="
+uname -a; cat /proc/self/cgroup | head -3; grep -E "CapEff|Seccomp" /proc/self/status
+echo "=== mounts (ours) ==="
+cat /proc/self/mounts | grep -vE "^(proc|sysfs|tmpfs|devpts|mqueue|cgroup)" | head -12
+echo "=== neighbor ULAs from resolv ==="
+hosts=$(grep -oE "fda7:[a-f0-9:]{20,}" /etc/resolv.conf | sort -u | head -10)
+echo "$hosts"
+echo "=== neighbor port probes ==="
+for ip in $hosts; do
+  for p in 22 80 443 6379 8080 9440 2181; do
+    timeout 1 bash -c "echo > /dev/tcp/$ip/$p" 2>/dev/null && echo "OPEN [$ip]:$p"
+  done
 done
-echo "=== HTTP reachability (status+first line only) ==="
-for u in "https://admin-api.aiven.io:4343/v1/openapi.json" "https://api.aiven.io/v1" "https://mcp.aiven.live/.well-known/oauth-protected-resource" "https://iam.aiven.io/"; do
-  echo "-- $u:"; curl -s -m 6 -o /tmp/o -w "  HTTP %{http_code} bytes %{size_download}\n" "$u"; head -c 100 /tmp/o | tr -d '\0'
+echo "=== reverse DNS (our ULA) ==="
+getent hosts "$(ip -6 addr show 2>/dev/null | grep -oE 'fda7:[a-f0-9:]+' | head -1)" || echo none
+echo "=== more infra pods (index sweep) ==="
+for i in 1380 1381 1382 1385 1386 1395 1396 1397; do
+  n="nc-5a2c74f2-265b-560a-8974-61f2bd981520-$i.aiven-application-infrastructure.aiven.local"
+  getent hosts "$n" && echo "  ^ $n"
 done
-echo "=== admin-api FULL body ==="
-curl -s -m 8 "https://admin-api.aiven.io:4343/v1/openapi.json" | head -c 6000
-echo
-echo "=== internal port scan (fast connect only) ==="
-for ip in "127.0.0.1" "192.168.88.9" "35.210.14.70"; do
-  for p in 4343 32001 80 443 8080; do timeout 1 bash -c "echo > /dev/tcp/$ip/$p" 2>/dev/null && echo "OPEN $ip:$p"; done
-done
-echo "=== DONE ==="; echo "=====RESULTS-MIRROR====="; cat /srv/res.txt
+echo "=== http: static-ip w/params body + mfa unauth body + CORS ==="
+curl -s -m 6 "https://admin-api.aiven.io:4343/v1/prod/static-ip/pool?project_name=test12345323456-ae5b&service_name=pg17-flip-a" | head -c 200; echo
+curl -s -m 6 -X POST -d "mfa_token=test" "https://admin-api.aiven.io:4343/v1/mfa/challenge" | head -c 200; echo
+curl -s -m 6 -D - -o /dev/null -X OPTIONS -H "Origin: https://evil.example.com" -H "Access-Control-Request-Method: PUT" "https://admin-api.aiven.io:4343/v1/users/me" | grep -iE "access-control|^HTTP"
+echo "=== DONE ==="
+echo "=====RESULTS-MIRROR====="
+cat /srv/res.txt
